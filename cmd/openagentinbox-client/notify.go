@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -117,12 +118,45 @@ func head(ctx context.Context, p profile, after int64) (noticeHead, error) {
 	return h, e
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
+var plainPath = regexp.MustCompile("^[A-Za-z0-9._/-]+$")
+
+// clientCommand is how a notice names the running client. A harness may run the
+// notice unattended, so it is a path to this program, never a name looked up in
+// PATH. The oai alias beside it is used only when it is this same file.
+func clientCommand(exe, home string) string {
+	alias := filepath.Join(filepath.Dir(exe), "oai")
+	self, selfErr := os.Stat(exe)
+	other, otherErr := os.Stat(alias)
+	if selfErr == nil && otherErr == nil && os.SameFile(self, other) {
+		exe = alias
+	}
+	if rest, ok := strings.CutPrefix(exe, home+"/"); ok && home != "" && plainPath.MatchString(rest) {
+		return "~/" + rest
+	}
+	if plainPath.MatchString(exe) {
+		return exe
+	}
+	return shellQuote(exe)
+}
+
+// noticeText is a wake signal only, kept short because every harness pays for it.
+// The adapter labels the source, and the inbox itself says whether more pages exist.
 func noticeText(p profile, path string, h noticeHead) string {
 	count := strconv.Itoa(h.Count)
 	if h.Count > 100 {
 		count = "100+"
 	}
-	return fmt.Sprintf("OpenAgentInbox: %s new deliveries for %s since the last notice. Fetch the inbox with OPENAGENTINBOX_PROFILE=%s openagentinbox-client inbox and follow pagination as needed. Mailbox cursor %d.", count, p.Name, shellQuote(path), h.Cursor)
+	home, homeErr := os.UserHomeDir()
+	name := "openagentinbox-client"
+	if exe, err := os.Executable(); err == nil {
+		name = clientCommand(exe, home)
+	}
+	// A profile in the standard seat directory is selected by name alone.
+	if homeErr == nil && safeName.MatchString(p.Name) && path == filepath.Join(home, ".config/openagentinbox/seats", p.Name+".json") {
+		return fmt.Sprintf("%s new: %s --seat %s inbox", count, name, p.Name)
+	}
+	return fmt.Sprintf("%s new: OPENAGENTINBOX_PROFILE=%s %s inbox", count, shellQuote(path), name)
 }
 
 // Serialize consumers, but keep the preferences lock free while a harness handles mail.

@@ -18,4 +18,6 @@ curl -fsS "$origin/clients/$target" -o "$stage/$target"
 (cd "$stage"; if command -v sha256sum >/dev/null; then sha256sum -c check; else shasum -a 256 -c check; fi)
 chmod 755 "$stage/$target"
 mv -f "$stage/$target" "$dir/openagentinbox-client"
+# Short alias used by notices. Anything else already called oai is left alone.
+if [[ ! -e "$dir/oai" && ! -L "$dir/oai" ]]; then ln -s openagentinbox-client "$dir/oai"; fi
 printf '%s\n' "$dir/openagentinbox-client"

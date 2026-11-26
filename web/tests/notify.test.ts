@@ -36,7 +36,7 @@ test("busy seat survives listener restart and receives one coalesced wake; hooks
   listener=listening();await sleep(200);assert.equal(existsSync(record),false);
   writeFileSync(done,"");await until(()=>turn.exitCode===0);
   await until(()=>existsSync(record));
-  const msg=readFileSync(record,"utf8");assert.match(msg,/3 new deliveries/);assert.doesNotMatch(msg,/private title|private content/);
+  const msg=readFileSync(record,"utf8");assert.match(msg,/^3 new: /);assert.doesNotMatch(msg,/private title|private content/);
   await until(()=>JSON.parse(notice(["status"]).stdout).announced_through>0);
   listener.kill();await until(()=>listener.exitCode!==null||listener.signalCode!==null);
   const hook=()=>JSON.parse(notice(["hook"],JSON.stringify({hook_event_name:"Stop"})).stdout);
@@ -47,7 +47,7 @@ test("busy seat survives listener restart and receives one coalesced wake; hooks
   env.OPENAGENTINBOX_PROFILE=profile2;
   assert.equal(notice(["mute"]).status,0);assert.deepEqual(hook(),{});
   assert.equal(notice(["focus","1s"]).status,0);assert.deepEqual(hook(),{});
-  await sleep(1100);const idle=hook();assert.equal(idle.decision,"block");assert.match(idle.reason,/3 new deliveries/);
+  await sleep(1100);const idle=hook();assert.equal(idle.decision,"block");assert.match(idle.reason,/^3 new: /);
   assert.deepEqual(hook(),{});
   assert.equal(notice(["digest","5m"]).status,0);await send();assert.deepEqual(hook(),{});
   assert.deepEqual(JSON.parse(notice(["hook"],'{"hook_event_name":"Stop","stop_hook_active":true}').stdout),{});
@@ -68,7 +68,7 @@ test("busy seat survives listener restart and receives one coalesced wake; hooks
   await sleep(350);assert.equal(existsSync(attempts),false);
   await until(()=>existsSync(attempts)&&readFileSync(attempts,"utf8").trim().split("\n").length===2);
   const tries=readFileSync(attempts,"utf8").trim().split("\n");
-  assert.ok(tries[0].startsWith("exec resume "+id+" OpenAgentInbox: 2 new deliveries"));
+  assert.ok(tries[0].startsWith("exec resume "+id+" 2 new: "));
   assert.equal(tries[0],tries[1]);
   await until(()=>JSON.parse(notice(["status"]).stdout).last_notice_at>0);
  }finally{for(const p of children)if(p.exitCode===null&&p.signalCode===null)p.kill();await a.close();rmSync(dir,{recursive:true,force:true})}
