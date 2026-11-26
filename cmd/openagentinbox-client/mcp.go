@@ -11,13 +11,32 @@ import (
 	"net/http"
 )
 
+// maxFrame is the longest stdio frame forwarded to the server, newline excluded.
+const maxFrame = 240000
+
 // serveMCP adapts framing only. The authenticated server owns tool discovery and execution.
 func serveMCP(ctx context.Context, p profile, input io.Reader, output io.Writer) error {
-	lines := bufio.NewScanner(input)
-	lines.Buffer(make([]byte, 4096), 240001)
+	reader := bufio.NewReader(input)
 	encoder := json.NewEncoder(output)
-	for lines.Scan() {
-		line := bytes.TrimSpace(lines.Bytes())
+	fail := func(id json.RawMessage, code int, message string) error {
+		return encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": message}})
+	}
+	for {
+		raw, oversized, err := readFrame(reader, maxFrame)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if oversized {
+			// The rest of the frame was discarded; the next frame is unaffected.
+			if err := fail(leadingID(raw), -32600, "MCP frame too large"); err != nil {
+				return err
+			}
+			continue
+		}
+		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
 			continue
 		}
@@ -30,7 +49,7 @@ func serveMCP(ctx context.Context, p profile, input io.Reader, output io.Writer)
 			if len(frame.ID) == 0 {
 				continue
 			}
-			if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "message": err.Error()}}); err != nil {
+			if err := fail(frame.ID, -32000, err.Error()); err != nil {
 				return err
 			}
 		} else if len(result) > 0 {
@@ -39,7 +58,59 @@ func serveMCP(ctx context.Context, p profile, input io.Reader, output io.Writer)
 			}
 		}
 	}
-	return lines.Err()
+}
+
+// readFrame reads one newline-terminated frame, holding at most max bytes plus one
+// read buffer. A longer frame is consumed to its end and returned as its first max bytes.
+func readFrame(r *bufio.Reader, max int) (frame []byte, oversized bool, err error) {
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !oversized {
+			frame = append(frame, chunk...)
+			if len(bytes.TrimSuffix(frame, []byte("\n"))) > max {
+				frame, oversized = frame[:max], true
+			}
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF) && len(frame) > 0:
+			return frame, oversized, nil
+		default:
+			return frame, oversized, err
+		}
+	}
+}
+
+// leadingID returns the top-level request id if it is complete within the prefix of
+// a truncated frame, and nil (JSON null) otherwise.
+func leadingID(prefix []byte) json.RawMessage {
+	decoder := json.NewDecoder(bytes.NewReader(prefix))
+	if start, err := decoder.Token(); err != nil || start != json.Delim('{') {
+		return nil
+	}
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil
+		}
+		if key == "id" {
+			var id any
+			if json.Unmarshal(value, &id) != nil {
+				return nil
+			}
+			switch id.(type) {
+			case string, float64:
+				return value
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func forwardMCP(ctx context.Context, p profile, line []byte) (json.RawMessage, error) {
