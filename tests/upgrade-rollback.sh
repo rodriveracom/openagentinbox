@@ -23,6 +23,13 @@
 # Both arguments are packaged installers (openagentinbox-install-X.Y.Z.sh). The
 # candidate must support upgrading from the previous release's version.
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
+#
+# Rehearsal on a copy of a real store: also set INBOX_SEED_STORE=/path/to/copy.sqlite, a
+# single-file snapshot written by the previous release (no -wal beside it). Only the
+# forward-only "late" failure and the printed manual restore then run, against that copy.
+# The host must have no default route, so nothing in the copy can be delivered anywhere,
+# and must be destroyed afterwards: the copy, its snapshots and the archives stay on it.
+# Only table row counts are reported; the installer's own log excerpts may name seats.
 set -euo pipefail
 shopt -s nullglob
 die(){
@@ -40,6 +47,12 @@ die(){
 for p in /opt/openagentinbox /var/lib/openagentinbox /etc/systemd/system/openagentinbox.service; do
   [[ ! -e $p ]] || die "$p exists; refusing to touch a host that already has an installation"
 done
+seed=${INBOX_SEED_STORE:-}
+if [[ -n $seed ]]; then
+  [[ -f $seed && ! -e $seed-wal && ! -e $seed-journal ]] || die 'INBOX_SEED_STORE must be a single-file snapshot'
+  [[ -z $(ip -4 route show default) && -z $(ip -6 route show default) ]] || die 'a rehearsal on a real store needs a host with no default route'
+  seed=$(readlink -f "$seed")
+fi
 previous_installer=$(readlink -f "$1")
 candidate_installer=$(readlink -f "$2")
 domain=inbox.test
@@ -326,6 +339,33 @@ forced_accepted(){
   wait_version "$old" || die "$mode: the previous release did not start from the kept copy"
   login_ok || die "$mode: owner login failed after recovery from the kept copy"
 }
+
+row_counts(){
+  runuser -u openagentinbox -- python3 -I -c 'import sqlite3,sys; c=sqlite3.connect("file:/var/lib/openagentinbox/console.sqlite?mode=ro",uri=True)
+for (t,) in c.execute("select name from sqlite_master where type=\"table\" and sql not like \"CREATE VIRTUAL%\" order by name").fetchall(): print(t, c.execute("select count(*) from \""+t+"\"").fetchone()[0])'
+}
+if [[ -n $seed ]]; then
+  echo 'rehearsal: replace the fresh store with the copy' >&2
+  rm -f /etc/openagentinbox/settings.env
+  systemctl stop openagentinbox.service
+  rm -f /var/lib/openagentinbox/console.sqlite{,-wal,-shm}
+  install -m 0600 -o openagentinbox -g openagentinbox "$seed" /var/lib/openagentinbox/console.sqlite
+  systemctl start openagentinbox.service
+  wait_version "$old" || die 'the previous release did not start on the copy'
+  row_counts > "$work/counts.before"
+  [[ -s $work/counts.before ]] || die 'could not count the rows of the copy'
+  # No owner password is known for a real store: "still intact" means the agents and
+  # messages tables hold as many rows as before the upgrade. Other differences are shown.
+  login_ok(){
+    row_counts > "$work/counts.after"
+    diff "$work/counts.before" "$work/counts.after" >&2 || true
+    diff <(grep -E '^(agents|messages) ' "$work/counts.before") <(grep -E '^(agents|messages) ' "$work/counts.after") >/dev/null
+  }
+  forced_accepted late
+  printf '{"schema":"openagentinbox.restore-rehearsal/v1","status":"pass","previous_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","store_sha256":"%s","arch":"%s"}\n' \
+    "$old" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$(sha256sum <"$seed" | cut -d' ' -f1)" "$arch"
+  exit 0
+fi
 
 refused_early early
 refused_early hostile
