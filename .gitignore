@@ -6,3 +6,4 @@
 /web/out/
 *.tsbuildinfo
 .env
+__pycache__/
