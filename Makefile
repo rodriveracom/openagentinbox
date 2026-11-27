@@ -68,9 +68,10 @@ release: check-web-venue
 	bash scripts/build-release.sh build/release-$(COMMIT)
 
 release-check: check-web-venue
-	mkdir -p build
+	mkdir -p build build/release-check-tmp
 	bash scripts/build-release.sh build/release-check-$(COMMIT)-a
-	bash scripts/build-release.sh build/release-check-$(COMMIT)-b
+	# A different TMPDIR for the second build: the artifacts must not depend on it.
+	TMPDIR="$(CURDIR)/build/release-check-tmp" bash scripts/build-release.sh build/release-check-$(COMMIT)-b
 	diff build/release-check-$(COMMIT)-a/MANIFEST.json build/release-check-$(COMMIT)-b/MANIFEST.json
 	diff build/release-check-$(COMMIT)-a/SHA256SUMS build/release-check-$(COMMIT)-b/SHA256SUMS
 	@echo 'reproducible: both builds have identical checksums'
