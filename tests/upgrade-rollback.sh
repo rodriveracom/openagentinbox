@@ -275,7 +275,7 @@ refused_early(){
   ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die "$mode: a restore ran although nothing had been stopped"
   systemctl is-active --quiet openagentinbox.service || die "$mode: service is not active"
   [[ $(systemctl show -p MainPID --value openagentinbox.service) == "$pid_before" ]] || die "$mode: the service was restarted (MainPID changed)"
-  [[ $(version_of) == "$old" ]] || die "early: service does not answer on $old"
+  [[ $(version_of) == "$old" ]] || die "$mode: service does not answer on $old"
   [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die "$mode: active release changed"
   login_ok || die "$mode: owner login failed"
   [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die "$mode: the store schema changed"
