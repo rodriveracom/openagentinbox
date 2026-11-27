@@ -59,12 +59,13 @@ func TestCommittedGenerationsAndSeatIsolation(t *testing.T) {
 	check(next, true)
 	check(other, false)
 
-	for _, seat := range []string{"architect", "postmaster"} {
+	for _, seat := range []string{"operator", "postmaster"} {
 		if err := s.PutSeat(SeatRec{Seat: seat}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	alert := signals("architect", false)
+	s.AlertRecipient = "operator"
+	alert := signals("operator", false)
 	sender := signals("a", true)
 	ach, sch := alert.Changes(), sender.Changes()
 	auto := []AutoResponse{{Seat: "b", Kind: "offline"}}

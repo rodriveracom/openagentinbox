@@ -82,6 +82,10 @@ var (
 )
 
 type Store struct {
+	// AlertRecipient also receives the first offline notice of each day for a seat.
+	// Empty, the default, sends no such alert. Set it before the store is shared.
+	AlertRecipient string
+
 	mailWrites     mailWriteQueue
 	insertDelivery *sql.Stmt
 	selectUnread   *sql.Stmt

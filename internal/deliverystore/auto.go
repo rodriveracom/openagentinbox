@@ -66,7 +66,7 @@ func (s *Store) AcceptWithAuto(ctx context.Context, m Message, now time.Time, bu
 	if accepted.Repeated {
 		return accepted, nil
 	}
-	var senderNotice, architectAlert bool
+	var senderNotice, alerted bool
 	for _, a := range automatic {
 		if m.Priority == 2 || m.Sender == "postmaster" || strings.Contains(string(m.Body), "\nAuto:") {
 			break
@@ -93,7 +93,7 @@ func (s *Store) AcceptWithAuto(ctx context.Context, m Message, now time.Time, bu
 			return Stored{}, e
 		}
 		senderNotice = true
-		if a.Kind == "offline" {
+		if a.Kind == "offline" && s.AlertRecipient != "" {
 			marker, e := tx.ExecContext(ctx, "INSERT OR IGNORE INTO auto_once VALUES(?,?,?,?)", "postmaster", a.Seat, "offline-alert", day)
 			if e != nil {
 				return Stored{}, e
@@ -103,9 +103,9 @@ func (s *Store) AcceptWithAuto(ctx context.Context, m Message, now time.Time, bu
 				return Stored{}, e
 			}
 			if count > 0 {
-				architectAlert = true
+				alerted = true
 				auto.ID = "msg-postmaster-alert-" + key
-				auto.Recipients = []string{"architect"}
+				auto.Recipients = []string{s.AlertRecipient}
 				if _, e = s.acceptRecordTx(ctx, tx, auto, now, 0); e != nil {
 					return Stored{}, e
 				}
@@ -120,8 +120,8 @@ func (s *Store) AcceptWithAuto(ctx context.Context, m Message, now time.Time, bu
 	if senderNotice {
 		s.signal([]string{m.Sender})
 	}
-	if architectAlert {
-		s.signal([]string{"architect"})
+	if alerted {
+		s.signal([]string{s.AlertRecipient})
 	}
 	return accepted, nil
 }
